@@ -31,13 +31,13 @@ User Query
     ▼
 ┌──────────────┐
 │  Lead Agent   │  Plans, delegates, verifies, synthesizes
-│  (main/opus)  │  NEVER does primary collection
+│ (max-capacity)│  NEVER does primary collection
 └──────┬───────┘
        │ sessions_spawn (parallel)
        ▼
 ┌────────────┐ ┌────────────┐ ┌────────────┐
 │ Collector 1 │ │ Collector 2 │ │ Collector N │  ← Wave 1: Collection
-│ (sonnet)    │ │ (sonnet)    │ │ (sonnet)    │
+│ (lead picks)│ │ (lead picks)│ │ (lead picks)│
 └──────┬──────┘ └──────┬──────┘ └──────┬──────┘
        │               │               │
        ▼               ▼               ▼
@@ -50,18 +50,24 @@ User Query
                        ▼
               ┌─────────────────┐
               │  Assembly Agent  │  ← Wave 2: Clean, deduplicate, structure
-              │  (sonnet)        │     Output: archive files
+              │  (lead picks)    │     Output: archive files
               └────────┬────────┘
                        │
               ┌─────────────────┐
               │  Analysis Agent  │  ← Wave 3: Interpret, analyze, synthesize
-              │  (sonnet)        │     Output: analysis files
+              │  (lead picks)    │     Output: analysis files
               └────────┬────────┘
                        │
                  Lead verifies → delivers to user
 ```
 
 **Critical**: Collection, assembly, and analysis are SEPARATE agents. Combining them produces either data-without-analysis or analysis-without-data.
+
+## Model Strategy
+
+- Lead agent should run with the highest-capability model and maximum reasoning budget available.
+- Lead agent decides model choice for each subagent based on task complexity, expected volume, and cost/speed tradeoffs.
+- Do not hardcode specific model names. Use capability tiers (max, high, mid, fast) and let the lead map those tiers to currently available models.
 
 ## Process
 
@@ -83,7 +89,7 @@ Spawn **collection agents** in parallel. Each collector:
 
 **The dump-first pattern is mandatory.** Agents that try to fetch-and-summarize in a single pass invariably skip items when they hit context limits. Dumping to files first means the data is preserved even if the agent runs out of budget for summarization.
 
-**Scope sizing**: Each Sonnet agent can reliably process ~50-80 items. For larger scopes, split into smaller agents rather than trusting one agent with 200+ items. A 6-month email window is better than a 2-year window.
+**Scope sizing**: A mid-capability collection agent can reliably process ~50-80 items. For larger scopes, split into smaller agents rather than trusting one agent with 200+ items. If using weaker/faster models, reduce scope further.
 
 ### Phase 3: Verify & Fill Gaps
 
@@ -185,3 +191,10 @@ Assembly agents clean and deduplicate — they do NOT summarize. If you started 
 - **Data source access patterns**: [references/data-sources.md](references/data-sources.md)
 - **Lead agent behavior**: [references/lead-agent.md](references/lead-agent.md)
 - **Subagent prompt template**: [references/subagent.md](references/subagent.md)
+
+## Attribution
+
+This skill's orchestration pattern is inspired by Anthropic's engineering post:
+https://www.anthropic.com/engineering/multi-agent-research-system
+
+This implementation is adapted for local skill workflows and corpus-first research.

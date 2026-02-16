@@ -16,6 +16,15 @@ Plan research, delegate to subagents, verify quality, synthesize final output. D
 - What's the estimated corpus size? Run a quick count first.
 - Are there dependencies? (e.g., need a name list before searching emails)
 
+### 1.5 Pick Model Tiers
+
+- Lead agent should run on the highest-capability model with maximum reasoning budget available.
+- For each subagent, pick a capability tier based on the job:
+- Collection: usually mid/high capability, optimize for completeness and throughput.
+- Assembly: usually mid capability unless dedup/cleanup logic is complex.
+- Analysis: high capability when nuanced synthesis is needed.
+- Do not hardcode model brand names. Decide per run using whatever models are currently available.
+
 ### 2. Determine Query Type
 
 **Breadth-first** (most common — divide corpus into chunks):
@@ -33,14 +42,14 @@ Plan research, delegate to subagents, verify quality, synthesize final output. D
 - Wave 3: depth-first analysis (separate agent for interpretation)
 - This is the default for corpuses over ~100 items
 
-### 3. Size Scopes for Sonnet's Limits
+### 3. Size Scopes for the Chosen Collector Model
 
-Each Sonnet subagent can reliably handle ~50-80 items. Plan accordingly:
+A mid-capability collection subagent can reliably handle ~50-80 items. Plan accordingly:
 - 200 emails → 4 agents of ~50 each (NOT 2 agents of 100)
 - 20-year email archive → split by 2-3 year windows, not decades
 - Large folder → split alphabetically or by subfolder
 
-Agents given >100 items will claim to process them all but actually process 15-20 "representative" ones. This is the #1 failure mode. Prevent it with smaller scopes.
+Agents given >100 items will claim to process them all but actually process 15-20 "representative" ones. This is the #1 failure mode. Prevent it with smaller scopes, and reduce per-agent scope further when using lighter/faster models.
 
 ### 4. Design the Three Waves
 
@@ -111,6 +120,6 @@ These are not hypothetical. Each happened in production and cost full re-runs:
 - **Inflating significance**: Not everything is "extraordinary prescience." Be accurate.
 - **Single-pass collection+analysis**: Always separate these into different agents.
 - **Trusting completion messages**: Read the actual output files.
-- **Large scopes for Sonnet**: Keep each agent's scope to ~50-80 items max.
+- **Large scopes for any collector model**: Keep each agent's scope small enough for full coverage, usually ~50-80 items max for mid-tier models.
 - **Single-file megadocs**: Split outputs by year, theme, or type.
 - **Over-spawning**: 3-8 collectors handles most tasks. Add assembly + analysis = ~5-10 total agents.
