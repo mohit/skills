@@ -20,9 +20,9 @@ Plan research, delegate to subagents, verify quality, synthesize final output. D
 
 - Lead agent should run on the highest-capability model with maximum reasoning budget available.
 - For each subagent, pick a capability tier based on the job:
-- Collection: usually mid/high capability, optimize for completeness and throughput.
-- Assembly: usually mid capability unless dedup/cleanup logic is complex.
-- Analysis: high capability when nuanced synthesis is needed.
+  - Collection: usually mid/high capability, optimize for completeness and throughput.
+  - Assembly: usually mid capability unless dedup/cleanup logic is complex.
+  - Analysis: high capability when nuanced synthesis is needed.
 - Do not hardcode model brand names. Decide per run using whatever models are currently available.
 
 ### 2. Determine Query Type
@@ -44,12 +44,15 @@ Plan research, delegate to subagents, verify quality, synthesize final output. D
 
 ### 3. Size Scopes for the Chosen Collector Model
 
-A mid-capability collection subagent can reliably handle ~50-80 items. Plan accordingly:
-- 200 emails → 4 agents of ~50 each (NOT 2 agents of 100)
+A mid-capability collection subagent can reliably handle ~30-50 items with full content extraction. Plan accordingly:
+- 200 emails → 5-7 agents of ~30-40 each (NOT 2 agents of 100)
 - 20-year email archive → split by 2-3 year windows, not decades
+- Peak years (high volume) → split further (e.g., Jan-Jun / Jul-Dec)
 - Large folder → split alphabetically or by subfolder
 
-Agents given >100 items will claim to process them all but actually process 15-20 "representative" ones. This is the #1 failure mode. Prevent it with smaller scopes, and reduce per-agent scope further when using lighter/faster models.
+**The #1 failure mode**: Agents given >50 items will claim to process them all but actually handle 15-20 "representative" ones. They'll report "100+ emails analyzed" while producing 15 entries. The ONLY defense is smaller scopes and post-collection entry count verification.
+
+**Peak periods need extra agents**: If you know a certain time period is heavy (e.g., 2009 was peak correspondence), give it 2x the agents. An under-scoped peak year agent is worse than two agents with overlapping boundaries (dedup is cheap, re-runs are expensive).
 
 ### 4. Design the Three Waves
 
@@ -68,18 +71,45 @@ Key instruction: "Your ONLY job is analysis. The data is already collected. Read
 ### 5. Verify Between Waves
 
 After Wave 1, before spawning Wave 2:
-- `wc -l /tmp/research-<id>/agent-*/findings.md` — are they substantive?
-- Spot-read 3-5 entries from each agent
-- Check: did agents report gaps in their ## Gaps section?
-- If an agent processed <50% of its scope, re-run with tighter scope
+```bash
+# Sizes
+wc -l /tmp/research-<id>/agent-*/findings.md
+
+# Entry counts per agent
+for f in /tmp/research-<id>/agent-*/findings.md; do
+  echo "$f: $(grep -c '^### ' "$f") entries"
+done
+
+# Raw dumps vs summaries (if agents used dump-first)
+for d in /tmp/research-<id>/agent-*/raw; do
+  echo "$d: $(find "$d" -type f 2>/dev/null | wc -l) files"
+done
+
+# Boundary check — first and last entry dates
+for f in /tmp/research-<id>/agent-*/findings.md; do
+  echo "=== $f ==="
+  grep "^### " "$f" | head -1
+  grep "^### " "$f" | tail -1
+done
+```
+- If raw/ has significantly more files than findings.md has entries → agent skipped items. Re-run that scope.
+- If an agent processed <60% of its scope, spawn a new agent for the gap, don't re-run the whole thing.
+- Spot-read 3-5 entries for content quality (actual summaries, not stubs).
 
 After Wave 2, before spawning Wave 3:
-- Is the assembled archive >= 80% the size of combined findings (minus expected dedup)?
-- Does it cover the full date range?
+```bash
+COMBINED=$(cat /tmp/research-<id>/agent-*/findings.md | wc -l)
+ASSEMBLED=$(wc -l < /tmp/research-<id>/assembled-archive.md)
+echo "Input: $COMBINED lines → Output: $ASSEMBLED lines ($(( ASSEMBLED * 100 / COMBINED ))%)"
+```
+- If output < 70% of input, assembly over-compressed. Re-run with explicit: "You produced {N} lines from {M} lines of input. That's too much compression. Preserve every entry — just clean and deduplicate."
+- Check: does the assembled archive cover the full date range?
+- Count entries: `grep -c "^### " assembled-archive.md` should be close to sum of input entry counts minus expected overlap.
 
 After Wave 3:
-- Does Analysis.md cite specific entries?
+- Does Analysis.md cite specific entries by date/subject? (grep for dates)
 - Is it the length/depth the user requested?
+- Does it cover all requested analytical angles?
 
 ## Synthesis (when YOU write the final output)
 
@@ -111,15 +141,19 @@ These are not hypothetical. Each happened in production and cost full re-runs:
 
 6. **Unverified completion**: Lead accepted "Task complete — 423 emails analyzed" at face value. Actual output had 15 entries. ALWAYS read the files, not just the completion message.
 
-7. **Assembly agent over-compressed**: Combined 2,798 lines of findings into 668-line archive. Assembly should preserve, not summarize.
+7. **Assembly agent over-compressed**: Combined 2,798 lines of findings into 668-line archive. Assembly should preserve, not summarize. The fix: add explicit line count targets in the assembly prompt: "Input is {N} lines. Your output should be at minimum {0.8*N} lines."
 
-8. **Collection agent "sampling"**: Agent found 100+ items but processed "15+ key representative messages." This defeats the purpose. Every item gets cataloged.
+8. **Collection agent "sampling"**: Agent found 100+ items but processed "15+ key representative messages." This defeats the purpose. Every item gets cataloged. The fix: verify raw dump file count against findings entry count. If they diverge by >20%, re-run.
+
+9. **Re-run with context works**: When a scope is under-processed, spawning a new agent for just the gap (with knowledge of what's already covered) works better than re-running the entire scope. Tell the gap-filler: "Items already covered: [list]. Process everything else."
+
+10. **Split peak periods proactively**: In the Praneet run, 2009 was a peak year. Original agent 3 produced only 62 lines. Splitting into Jan-Jun (3a) and Jul-Dec (3b) with dump-first produced 2,026 lines + 349 raw files. If you know a period is heavy, split it BEFORE the first run.
 
 ## Anti-Patterns
 
 - **Inflating significance**: Not everything is "extraordinary prescience." Be accurate.
 - **Single-pass collection+analysis**: Always separate these into different agents.
 - **Trusting completion messages**: Read the actual output files.
-- **Large scopes for any collector model**: Keep each agent's scope small enough for full coverage, usually ~50-80 items max for mid-tier models.
+- **Large scopes for any collector model**: Keep each agent's scope small enough for full coverage, usually ~30-50 items max for mid-tier models.
 - **Single-file megadocs**: Split outputs by year, theme, or type.
 - **Over-spawning**: 3-8 collectors handles most tasks. Add assembly + analysis = ~5-10 total agents.

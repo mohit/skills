@@ -67,6 +67,12 @@ At the end of findings.md, add:
 - Preserve actual quotes and phrasing. Don't over-paraphrase.
 - The REAL output is in the files. Your completion message is just a 3-sentence pointer.
 
+## Self-Check Before Finishing
+1. Count files in raw/: `find {output_path}/raw -type f | wc -l`
+2. Count entries in findings.md: `grep -c "^### " {output_path}/findings.md`
+3. If these numbers differ by >20%, you skipped items. Go back and process them.
+4. Check your Statistics section — do the numbers add up?
+
 Budget: {N} tool calls for API fetching, unlimited for file read/write.
 ```
 
@@ -80,6 +86,8 @@ You are assembling a clean archive from collected research data.
 ## Input
 {list of findings files and links files to read}
 
+Total input: approximately {N} lines across {M} files containing approximately {E} entries.
+
 ## Output
 {output file paths}
 
@@ -90,15 +98,21 @@ Read all input files and produce:
 1. A single chronologically ordered archive with every entry preserved
 2. A deduplicated, themed link archive
 
-Rules:
+## Rules (these are hard constraints, not suggestions)
 - Keep EVERY entry from source data. Do not skip, compress, or summarize entries.
-- Deduplicate: if the same message appears from multiple agents' overlapping scopes, keep one copy
-- Fix formatting issues but preserve all content, quotes, and links
+- Each unique input entry (marked with ### heading) must appear in your output. If you have {E} input entries and expect ~{D} duplicates, your output must have at least {E - D} entries.
+- Deduplicate: if the same message appears from multiple agents' overlapping scopes, keep one copy. Match on date + subject to identify duplicates.
+- Fix formatting issues but preserve all content, quotes, and links.
 - Remove email header URL artifacts (http://gmail.com, etc.)
-- Group by year with a 1-2 sentence year introduction
-- Your output should be LONGER than or equal to the combined inputs (minus duplicates)
+- Group by year with a 1-2 sentence year introduction.
 
-If combined input is 3,000 lines, your output should not be 600 lines. That means you over-compressed.
+## Size Target
+Input is approximately {N} lines. Your output should be at MINIMUM {MIN_LINES} lines (lead computes this before spawning you). If your output is significantly shorter, you are compressing — go back and find what you dropped.
+
+This is a common failure: assembly agents "summarize" when their job is to "merge." If an entry is 6 lines in the input, it should be ~6 lines in the output. You're a librarian shelving books, not a reviewer writing blurbs.
+
+## Self-Check Before Finishing
+Count your output entries (### headings). Compare to the expected count of {E - D}. If you're short, you dropped entries — go find them.
 ```
 
 ---

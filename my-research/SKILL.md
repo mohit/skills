@@ -89,16 +89,34 @@ Spawn **collection agents** in parallel. Each collector:
 
 **The dump-first pattern is mandatory.** Agents that try to fetch-and-summarize in a single pass invariably skip items when they hit context limits. Dumping to files first means the data is preserved even if the agent runs out of budget for summarization.
 
-**Scope sizing**: A mid-capability collection agent can reliably process ~50-80 items. For larger scopes, split into smaller agents rather than trusting one agent with 200+ items. If using weaker/faster models, reduce scope further.
+**Scope sizing**: A mid-capability collection agent can reliably process ~30-50 items with full content extraction, or ~50-80 items with metadata-only. For larger scopes, split into smaller agents. A 6-month email window is better than a 2-year window. If a scope might have 100+ items, split it further — agents WILL claim to have processed everything but actually handle 15-20 "representative" items. This is the single most common failure mode. If using weaker/faster models, reduce scope further.
 
 ### Phase 3: Verify & Fill Gaps
 
-After all collectors complete, the lead agent MUST:
-1. Check each agent's output: `wc -l /tmp/research-<id>/agent-*/findings.md`
-2. Spot-read 3-5 entries from each agent — do they have actual content or just metadata stubs?
-3. Compare item counts: if an agent found 100 items but its findings.md has 15 entries, it under-processed
-4. Check boundary coverage: are the earliest/latest dates what we expected?
-5. Spawn gap-filling agents for any under-processed scopes
+After all collectors complete, the lead agent MUST run these concrete checks:
+
+```bash
+# 1. Check output sizes — anything under 50 lines is suspicious
+wc -l /tmp/research-<id>/agent-*/findings.md
+
+# 2. Count actual entries vs reported items
+grep -c "^### " /tmp/research-<id>/agent-*/findings.md
+
+# 3. Check raw dump counts vs summary counts
+find /tmp/research-<id>/agent-*/raw -type f | wc -l  # files dumped
+grep -c "^### " /tmp/research-<id>/agent-*/findings.md  # entries written
+
+# 4. Check date boundaries
+head -20 /tmp/research-<id>/agent-*/findings.md  # earliest entries
+tail -20 /tmp/research-<id>/agent-*/findings.md  # latest entries
+```
+
+Verification checklist:
+1. **Raw count vs summary count**: If raw/ has 80 files but findings.md has 25 entries, the agent skipped 55 items. Re-run with tighter scope.
+2. **Content depth**: Spot-read 3-5 entries — do they have actual content summaries or just subject lines? "Content: likely sharing interesting article" is a failure.
+3. **Boundary coverage**: Are the earliest/latest dates what we expected? If you asked for 2005-2009 but earliest entry is 2008, there's a gap.
+4. **Gap section**: Did the agent report gaps? If not but counts don't add up, the agent silently skipped items.
+5. Spawn gap-filling agents for any under-processed scopes. Don't move to assembly with known gaps.
 
 ### Phase 4: Assemble (Wave 2)
 
@@ -109,6 +127,20 @@ Spawn an **assembly agent** that reads ALL findings files and produces clean out
 - Filter false-positive links (email header domains, etc.)
 
 **Assembly mandate**: The assembly agent's job is to CLEAN and DEDUPLICATE, not to SUMMARIZE. Output should be LONGER than or equal to total input minus duplicates. If the combined findings are 3,000 lines, the assembled archive should not be 600 lines.
+
+After assembly completes, verify:
+```bash
+# Combined input size
+cat /tmp/research-<id>/agent-*/findings.md | wc -l
+
+# Assembly output size
+wc -l /tmp/research-<id>/assembled-archive.md
+
+# Entry counts
+grep -c "^### " /tmp/research-<id>/agent-*/findings.md  # input entries
+grep -c "^### " /tmp/research-<id>/assembled-archive.md  # output entries
+```
+If output entries < 80% of input entries (after expected dedup), the assembly agent over-compressed. Re-run with an explicit instruction: "You dropped entries. Your previous output had {N} entries but input had {M}. Preserve every entry this time."
 
 ### Phase 5: Analyze (Wave 3)
 
@@ -130,10 +162,12 @@ Spawn an **analysis agent** that reads the assembled archive and writes interpre
 
 | Corpus Size | Collectors | Scope per Agent | Example |
 |---|---|---|---|
-| < 50 items | 1-2 | All items | "Summarize my emails with X this month" |
-| 50-200 items | 3-5 | ~40-50 items each | "Analyze all emails between me and X" |
-| 200-500 items | 5-8 | ~50-70 items each | "Build a report from this folder of notes" |
-| 500+ items | 8-15 | ~50-80 items each | "Synthesize themes across my entire vault" |
+| < 30 items | 1 | All items | "Summarize my emails with X this month" |
+| 30-100 items | 2-4 | ~30-40 items each | "Analyze all emails between me and X this year" |
+| 100-300 items | 4-8 | ~30-50 items each | "Build a report from this folder of notes" |
+| 300+ items | 8-15 | ~30-50 items each | "Synthesize themes across my entire vault" |
+
+**Err on the side of more, smaller agents.** An agent with 30 items will process all 30. An agent with 100 items will process 20 and claim it did 100. The overhead of extra agents is cheap; missing data costs full re-runs.
 
 Plus 1 assembly agent + 1 analysis agent. Never exceed 15 collectors.
 
@@ -156,13 +190,38 @@ See [references/subagent.md](references/subagent.md) for the full template.
 
 Before declaring research complete, the lead MUST verify:
 
-1. **Coverage**: Count entries in assembled archive vs. estimated corpus size. If <80%, there are gaps.
-2. **Content depth**: Spot-read 5 entries. Do they have actual content summaries or just subject lines? Entries saying "Content: likely sharing interesting content" are failures.
+Run these concrete checks — not vibes, not spot-reads alone:
+
+```bash
+# 1. Coverage: entry count vs expected corpus size
+EXPECTED=300  # set from your initial count query
+ACTUAL=$(grep -c "^### " /path/to/assembled-archive.md)
+echo "Coverage: $ACTUAL / $EXPECTED entries ($(( ACTUAL * 100 / EXPECTED ))%)"
+# FAIL if <80%
+
+# 2. Content depth: entries with actual summaries vs stubs
+grep -A2 "^### " /path/to/assembled-archive.md | grep "Content:" | head -10
+# FAIL if entries say "likely sharing" or "content not available"
+
+# 3. Link hygiene
+grep -E "http://(gmail|yahoo|google|outlook)\\.com" /path/to/links.md
+# FAIL if any matches
+
+# 4. Date boundaries
+head -5 /path/to/assembled-archive.md  # earliest
+tail -20 /path/to/assembled-archive.md  # latest
+# FAIL if outside expected range
+```
+
+Full checklist:
+1. **Coverage**: Entry count >= 80% of estimated corpus size. If not, there are gaps.
+2. **Content depth**: Entries have actual content summaries, not subject-line guesses. "Content: likely sharing interesting content" is a failure.
 3. **Data + analysis**: Both the archive AND the analysis must exist. One without the other is incomplete.
 4. **Link hygiene**: No `http://gmail.com` or email-domain artifacts in link lists.
 5. **Source type coverage**: If source has emails AND chats, both should be present.
-6. **File size sanity**: 400 items → archive should be 2000+ lines. 20 items → should not be 5000 lines.
-7. **Boundary verification**: Earliest and latest entries should match expected date range.
+6. **File size sanity**: Each cataloged item → ~5-10 lines. 300 items → archive should be 1,500-3,000 lines.
+7. **Boundary verification**: Earliest and latest entries match expected date range.
+8. **Assembly compression check**: Assembled output line count >= 80% of combined findings input (minus dedup).
 
 If any gate fails → spawn a fix-up agent. Don't ship incomplete work.
 
